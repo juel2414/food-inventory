@@ -98,6 +98,12 @@ label.l{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
 .seg{display:flex;background:#e9e6dd;border-radius:10px;padding:3px;margin:16px 0 4px}
 .seg button{flex:1;border:0;background:none;padding:8px;border-radius:8px;font-weight:600;color:var(--muted)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
+.rcard{display:flex;gap:10px;align-items:flex-start;background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:12px;margin-bottom:8px;border:2px solid transparent;cursor:pointer}
+.rcard.on{border-color:var(--out);background:#fffaf6}
+.rcheck{width:22px;height:22px;border-radius:7px;border:2px solid #cfcabd;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;margin-top:1px}
+.rcard.on .rcheck{background:var(--out);border-color:var(--out)}
+.selbar{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));z-index:26;background:#fff;border-top:1px solid var(--line);box-shadow:0 -4px 14px rgba(0,0,0,.08);padding:10px 16px;display:flex;align-items:center;gap:8px;max-width:760px;margin:0 auto}
+.selbar .small{color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46vw}
 .msg{font-size:13px;margin-top:10px;min-height:18px}
 .rline{background:#fff;border-radius:12px;box-shadow:var(--shadow);padding:10px;margin-bottom:8px}
 .rline.off{opacity:.45}
@@ -188,7 +194,7 @@ table.ledger tfoot td{border-top:2px solid var(--ink);font-weight:700;background
   <nav class="tabs">
     <button data-tab="stock" onclick="setTab('stock')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>재고</button>
     <button data-tab="meals" onclick="setTab('meals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>식단</button>
-    <button data-tab="recipes" onclick="setTab('recipes')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h16a8 8 0 0 1-16 0z"/><path d="M9 9c0-2 2-2 2-4M13 9c0-2 2-2 2-4"/></svg>레시피</button>
+    <button data-tab="recipes" onclick="setTab('recipes')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h16a8 8 0 0 1-16 0z"/><path d="M9 9c0-2 2-2 2-4M13 9c0-2 2-2 2-4"/></svg>레시피북</button>
     <button data-tab="history" onclick="setTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h11l3 3v15H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>수불부</button>
     <button data-tab="more" onclick="setTab('more')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>설정</button>
   </nav>
@@ -375,7 +381,7 @@ async function refresh(){ await Promise.all([loadCore(), loadMeals()]); if (S.ta
 function setTab(t){
   S.tab = t;
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  $('title').textContent = { stock:'재고', meals:'식단표', recipes:'레시피', history:'재고 수불부', more:'설정' }[t];
+  $('title').textContent = { stock:'재고', meals:'식단표', recipes:'레시피북', history:'재고 수불부', more:'설정' }[t];
   window.scrollTo(0,0);
   if (t === 'history') loadHistory(); else render();
 }
@@ -655,15 +661,15 @@ function ingChanged(){
 function recipePicker(){
   if (!S.recipes.length) return '';
   return `<div class="row" style="margin-top:6px"><select class="f grow" id="rp_sel"><option value="">레시피 불러오기...</option>${S.recipes.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select>
-    <input class="f" id="rp_mul" type="number" inputmode="decimal" step="any" value="1" style="width:70px" title="배수"><span class="small muted">배</span>
+    <input class="f" id="rp_ppl" type="number" inputmode="numeric" placeholder="인원" style="width:76px"><span class="small muted">명</span>
     <button class="btn ghost sm" onclick="applyRecipe()">추가</button></div>`;
 }
 function applyRecipe(){
   const rid = $('rp_sel').value; if (!rid) return;
-  const mul = num($('rp_mul').value) || 1;
   const r = S.recipes.find(x => x.id === rid);
-  if ($('m_title') && !$('m_title').value.trim()) $('m_title').value = r.name;
-  S.recipeItems.filter(x => x.recipe_id === rid).forEach(x => { if (itemById(x.item_id)) addIngRow(x.item_id, Math.round(num(x.quantity)*mul*1000)/1000); });
+  const mul = scaleOf(r, num($('rp_ppl').value));
+  if ($('m_title')) { const t = $('m_title').value.trim(); $('m_title').value = t ? (t.includes(r.name) ? t : t + ', ' + r.name) : r.name; }
+  recipeLines(rid).forEach(x => addIngRow(x.item_id, round3(num(x.quantity) * mul)));
   $('rp_sel').value = '';
 }
 function mealEditor(id, date, slot){
@@ -732,45 +738,157 @@ async function cancelMeal(id){
   closeSheet(); await refresh();
 }
 
-// ---------- 레시피 ----------
-function renderRecipes(){
-  $('main').innerHTML = S.recipes.length ? `<p class="small muted" style="margin:4px 2px 10px">자주 만드는 메뉴의 재료 세트를 저장해 두면 식단에서 한 번에 불러올 수 있어요.</p>` +
-    S.recipes.map(r => {
-      const ri = S.recipeItems.filter(x => x.recipe_id === r.id);
-      return `<div class="card" onclick="recipeEditor('${r.id}')"><b>${esc(r.name)}</b>
-        <div class="small muted" style="margin-top:4px;line-height:1.6">${ri.map(x => { const i = itemById(x.item_id); return i ? `${esc(i.name)} ${fmt(x.quantity)}${esc(i.unit)}` : ''; }).filter(Boolean).join(', ') || '재료 없음'}</div>
-        ${r.memo ? `<div class="small muted">${esc(r.memo)}</div>` : ''}</div>`;
-    }).join('') : `<div class="empty">저장된 레시피가 없어요.<br>+ 버튼으로 자주 만드는 메뉴를 등록해보세요.</div>`;
-  setFab(() => recipeEditor());
+// ---------- 레시피북 ----------
+const RECIPE_CATS = ['밥·죽','국·찌개·탕','메인요리','반찬','김치·절임','면·분식','샐러드','간식·디저트','음료','기타'];
+const RB = { q:'', cat:'all', sel:[] };
+const recipeLines = rid => S.recipeItems.filter(x => x.recipe_id === rid && x.item_id && itemById(x.item_id)).sort((a,b) => a.sort - b.sort);
+const scaleOf = (r, ppl) => r.servings && ppl ? ppl / r.servings : 1;
+const round3 = v => Math.round(v * 1000) / 1000;
+function recipeShort(rid, mul = 1){
+  return recipeLines(rid).filter(x => num(x.quantity) * mul > num(itemById(x.item_id).quantity)).length;
 }
+function renderRecipes(){
+  const cats = [...new Set(S.recipes.map(r => r.category || '기타'))];
+  let list = [...S.recipes].sort((a,b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name, 'ko'));
+  if (RB.cat === 'fav') list = list.filter(r => r.favorite);
+  else if (RB.cat !== 'all') list = list.filter(r => (r.category || '기타') === RB.cat);
+  if (RB.q.trim()) list = list.filter(r => (r.name + recipeLines(r.id).map(x => itemById(x.item_id).name).join(' ')).includes(RB.q.trim()));
+  RB.sel = RB.sel.filter(id => S.recipes.some(r => r.id === id));
+  let html = `<p class="small muted" style="margin:2px 2px 10px">메뉴를 눌러 여러 개 고른 뒤 <b>재료 불러오기</b>를 누르면, 필요한 재료를 합쳐서 한 번에 출고할 수 있어요.</p>
+    <div class="search"><input class="f" placeholder="메뉴·재료 검색" value="${esc(RB.q)}" oninput="RB.q=this.value;clearTimeout(RB.t);RB.t=setTimeout(renderRecipes,250)"></div>
+    <div class="filters">
+      <button class="${RB.cat==='all'?'on':''}" onclick="RB.cat='all';renderRecipes()">전체 ${S.recipes.length}</button>
+      <button class="${RB.cat==='fav'?'on':''}" onclick="RB.cat='fav';renderRecipes()">★ 즐겨찾기</button>
+      ${cats.map(c => `<button class="${RB.cat===c?'on':''}" onclick="RB.cat='${esc(c)}';renderRecipes()">${esc(c)}</button>`).join('')}
+    </div>`;
+  if (!S.recipes.length) html += `<div class="empty">아직 등록된 메뉴가 없어요.<br>+ 버튼으로 메뉴와 재료를 등록해보세요.</div>`;
+  else if (!list.length) html += `<div class="empty">해당하는 메뉴가 없어요.</div>`;
+  html += list.map(r => {
+    const ls = recipeLines(r.id), on = RB.sel.includes(r.id), short = recipeShort(r.id);
+    return `<div class="rcard ${on ? 'on' : ''}" onclick="rbToggle('${r.id}')">
+      <div class="rcheck">${on ? '✓' : ''}</div>
+      <div class="grow">
+        <div class="row" style="gap:6px"><b>${esc(r.name)}</b>${r.favorite ? '<span style="color:#d49b1f">★</span>' : ''}<span class="chip">${esc(r.category || '기타')}</span>
+          ${r.servings ? `<span class="small muted">${r.servings}인분</span>` : ''}</div>
+        <div class="small muted" style="margin-top:4px;line-height:1.55">${ls.map(x => { const i = itemById(x.item_id); return `${esc(i.name)} ${fmt(x.quantity)}${esc(i.unit)}`; }).join(', ') || '재료 없음'}</div>
+        ${short ? `<div class="small" style="color:var(--warn);margin-top:2px">기준 인원으로 재고 부족 ${short}개</div>` : ''}
+      </div>
+      <button class="btn ghost sm" onclick="event.stopPropagation();recipeEditor('${r.id}')">수정</button>
+    </div>`;
+  }).join('');
+  if (RB.sel.length) html += `<div style="height:64px"></div><div class="selbar"><span class="grow"><b>${RB.sel.length}개 메뉴</b> <span class="small">${esc(RB.sel.map(id => S.recipes.find(r => r.id === id)?.name).join(', '))}</span></span>
+      <button class="btn ghost sm" onclick="RB.sel=[];renderRecipes()">해제</button><button class="btn out" onclick="issueSheet()">재료 불러오기</button></div>`;
+  $('main').innerHTML = html;
+  setFab(() => recipeEditor());
+  $('fab').classList.toggle('hidden', RB.sel.length > 0);
+}
+function rbToggle(id){ RB.sel = RB.sel.includes(id) ? RB.sel.filter(x => x !== id) : [...RB.sel, id]; renderRecipes(); }
+
+// ----- 메뉴 선택 → 재료 합치기 → 출고 -----
+const IS = { menus:[], extra:[] };
+function issueSheet(){
+  IS.date = today(); IS.slot = new Date().getHours() < 10 ? 'breakfast' : new Date().getHours() < 15 ? 'lunch' : 'dinner';
+  IS.menus = RB.sel.map(id => { const r = S.recipes.find(x => x.id === id); return { id, ppl: r.servings || '' }; });
+  IS.edits = {}; IS.removed = new Set();
+  openSheet(`<h2>재료 불러오기</h2>
+    <div class="grid2"><div><label class="l">날짜</label><input class="f" type="date" value="${IS.date}" onchange="IS.date=this.value"></div>
+      <div><label class="l">끼니</label><select class="f" onchange="IS.slot=this.value">${Object.entries(SLOTS).map(([k,v]) => `<option value="${k}" ${k===IS.slot?'selected':''}>${v}</option>`).join('')}</select></div></div>
+    <label class="l">메뉴별 인원 (기준 인원 대비 재료 양이 자동 조절돼요)</label>
+    <div class="row" style="gap:6px;margin-bottom:6px"><span class="small muted grow">전체 인원 한 번에 맞추기</span><input class="f" id="is_all" type="number" inputmode="numeric" placeholder="예: 40" style="width:96px" oninput="IS.menus.forEach(m=>m.ppl=this.value);document.querySelectorAll('.is-ppl').forEach(e=>e.value=this.value);IS.edits={};renderIssueItems()"><span class="small muted">명</span></div>
+    <div class="list">${IS.menus.map((m, k) => { const r = S.recipes.find(x => x.id === m.id); return `<div class="item"><div class="grow"><b>${esc(r.name)}</b><div class="small muted">${r.servings ? `기준 ${r.servings}인분` : '기준 인원 없음 (등록된 양 그대로)'}</div></div>
+      ${r.servings ? `<input class="f is-ppl" type="number" inputmode="numeric" value="${m.ppl}" style="width:80px" oninput="IS.menus[${k}].ppl=this.value;IS.edits={};renderIssueItems()"><span class="small muted">명</span>` : ''}</div>`; }).join('')}</div>
+    <div class="row" style="margin:12px 2px 4px"><b class="grow">출고할 재료</b><span class="small muted">수량을 고칠 수 있어요</span></div>
+    <div id="is_items"></div>
+    <div class="acts" style="flex-wrap:wrap">
+      <button class="btn ghost" onclick="closeSheet()">닫기</button>
+      <button class="btn ghost" onclick="issueSubmit(false)">식단에만 저장</button>
+      <button class="btn out" style="flex-basis:100%" id="is_ok" onclick="issueSubmit(true)">출고하기 (재고 차감)</button>
+    </div>
+    <p class="small muted">출고하면 식단표에 "사용 완료"로 남고, 잘못 출고했으면 식단표에서 사용 취소할 수 있어요.</p>`);
+  renderIssueItems();
+}
+function issueTotals(){
+  const tot = {};
+  IS.menus.forEach(m => { const r = S.recipes.find(x => x.id === m.id); const mul = scaleOf(r, num(m.ppl));
+    recipeLines(m.id).forEach(x => { tot[x.item_id] = (tot[x.item_id] || 0) + num(x.quantity) * mul; }); });
+  IS.removed.forEach(id => delete tot[id]);
+  Object.entries(IS.edits).forEach(([id, v]) => { if (tot[id] !== undefined) tot[id] = v; });
+  return Object.entries(tot).map(([item_id, q]) => ({ item_id, quantity: round3(num(q)) }));
+}
+function renderIssueItems(){
+  const rows = issueTotals();
+  const short = rows.filter(r => r.quantity > num(itemById(r.item_id).quantity));
+  $('is_items').innerHTML = (short.length ? `<div class="banner warn">재고 부족 ${short.length}개: ${short.map(r => esc(itemById(r.item_id).name)).join(', ')}</div>` : '') +
+    `<div class="list">${rows.map(r => { const i = itemById(r.item_id), lack = r.quantity > num(i.quantity);
+      return `<div class="item"><div class="grow"><b>${esc(i.name)}</b><div class="small ${lack ? '' : 'muted'}" style="${lack ? 'color:var(--warn)' : ''}">재고 ${fmt(i.quantity)}${esc(i.unit)} → ${fmt(num(i.quantity) - r.quantity)}${esc(i.unit)}</div></div>
+        <input class="f" type="number" inputmode="decimal" step="any" value="${r.quantity}" style="width:84px" onchange="IS.edits['${r.item_id}']=num(this.value);renderIssueItems()"><span class="small muted" style="width:26px">${esc(i.unit)}</span>
+        <button class="x" style="border:0;background:#efede6;border-radius:8px;width:32px;height:36px" onclick="IS.removed.add('${r.item_id}');renderIssueItems()">✕</button></div>`; }).join('') || '<div class="empty">불러올 재료가 없어요</div>'}</div>`;
+}
+async function issueSubmit(deduct){
+  const lines = issueTotals().filter(r => r.quantity > 0);
+  if (!lines.length) return toast('출고할 재료가 없어요');
+  const names = IS.menus.map(m => S.recipes.find(x => x.id === m.id).name);
+  const ppl = [...new Set(IS.menus.map(m => m.ppl).filter(Boolean))];
+  if (deduct) {
+    const short = lines.filter(r => r.quantity > num(itemById(r.item_id).quantity));
+    const msg = `${md(IS.date)} ${SLOTS[IS.slot]} · ${names.join(', ')}\n재료 ${lines.length}개를 재고에서 차감할까요?` + (short.length ? `\n\n⚠ 재고 부족: ${short.map(r => itemById(r.item_id).name).join(', ')} (마이너스로 기록돼요)` : '');
+    if (!confirm(msg)) return;
+  }
+  $('is_ok').disabled = true;
+  try {
+    const meal = await run(sb.from('inv_meals').insert({ meal_date: IS.date, slot: IS.slot, title: names.join(', '),
+      memo: ppl.length === 1 ? `${ppl[0]}명` : '', recipe_id: IS.menus.length === 1 ? IS.menus[0].id : null,
+      servings: ppl.length === 1 ? num(ppl[0]) : null }).select().single());
+    await run(sb.from('inv_meal_items').insert(lines.map(l => ({ ...l, meal_id: meal.id }))));
+    if (deduct) { const n = await run(sb.rpc('inv_complete_meal', { p_meal: meal.id })); toast(`재료 ${n}개를 출고했어요`); }
+    else toast('식단표에 저장했어요');
+    closeSheet(); RB.sel = []; await refresh();
+  } catch { $('is_ok').disabled = false; }
+}
+
+// ----- 메뉴(레시피) 등록·수정 -----
 function recipeEditor(id){
-  const r = id ? S.recipes.find(x => x.id === id) : { name:'', memo:'' };
-  openSheet(`<h2>${id ? '레시피 수정' : '새 레시피'}</h2>
+  const r = id ? S.recipes.find(x => x.id === id) : { name:'', category:'국·찌개·탕', servings:'', memo:'', favorite:false };
+  const cats = [...new Set([...RECIPE_CATS, ...S.recipes.map(x => x.category || '기타')])];
+  openSheet(`<div class="row"><h2 class="grow">${id ? '메뉴 수정' : '새 메뉴'}</h2>
+      ${id ? `<button class="btn ghost sm" onclick="toggleFav('${id}')">${r.favorite ? '★ 즐겨찾기' : '☆ 즐겨찾기'}</button>` : ''}</div>
     <label class="l">메뉴 이름</label><input class="f" id="r_name" value="${esc(r.name)}" placeholder="예: 김치찌개">
-    <label class="l">재료 (1회분 기준)</label>
+    <div class="grid2">
+      <div><label class="l">분류</label><input class="f" id="r_cat" list="dl_rcat" value="${esc(r.category || '기타')}"><datalist id="dl_rcat">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div><label class="l">기준 인원 (몇 인분 재료인지)</label><input class="f" id="r_srv" type="number" inputmode="numeric" value="${r.servings ?? ''}" placeholder="예: 40"></div>
+    </div>
+    <label class="l">재료 (기준 인원 분량)</label>
     <div id="ings"></div><div class="ingwarn" id="ingWarn" data-ctx="recipe"></div>
     <button class="btn ghost sm" onclick="addIngRow()">+ 재료 추가</button>
-    <label class="l">메모</label><input class="f" id="r_memo" value="${esc(r.memo)}" placeholder="예: 40인분 기준">
+    <label class="l">메모</label><input class="f" id="r_memo" value="${esc(r.memo)}" placeholder="예: 고춧가루는 취향껏">
     <div class="acts">
       ${id ? `<button class="btn ghost" style="flex:0 0 auto;color:var(--warn)" onclick="deleteRecipe('${id}')">삭제</button>` : ''}
-      <button class="btn ghost" onclick="closeSheet()">닫기</button><button class="btn" onclick="saveRecipe(${id?`'${id}'`:'null'})">저장</button></div>`);
-  const ri = id ? S.recipeItems.filter(x => x.recipe_id === id) : [];
+      <button class="btn ghost" onclick="closeSheet()">닫기</button><button class="btn" onclick="saveRecipe(${id ? `'${id}'` : 'null'})">저장</button></div>`);
+  const ri = id ? recipeLines(id) : [];
   if (ri.length) ri.forEach(x => addIngRow(x.item_id, num(x.quantity))); else addIngRow();
+  if (!id) setTimeout(() => $('r_name').focus(), 100);
 }
 async function saveRecipe(id){
-  const row = { name:$('r_name').value.trim(), memo:$('r_memo').value.trim() };
-  if (!row.name) return toast('메뉴 이름을 입력해주세요');
-  const ings = readIngs();
-  let rid = id;
-  if (id) await run(sb.from('inv_recipes').update(row).eq('id', id));
-  else rid = (await run(sb.from('inv_recipes').insert(row).select().single())).id;
-  await run(sb.from('inv_recipe_items').delete().eq('recipe_id', rid));
-  if (ings.length) await run(sb.from('inv_recipe_items').insert(ings.map(x => ({ ...x, recipe_id:rid }))));
-  closeSheet(); toast('저장했어요'); await refresh();
+  const name = $('r_name').value.trim();
+  if (!name) return toast('메뉴 이름을 입력해주세요');
+  const old = id ? S.recipes.find(x => x.id === id) : {};
+  // 화면에 없는 기존 정보(조리 순서 등)는 그대로 유지
+  const recipe = { name, category: $('r_cat').value.trim() || '기타', servings: $('r_srv').value ? String(Math.round(num($('r_srv').value))) : '',
+    memo: $('r_memo').value.trim(), steps: old.steps || [], tips: old.tips || '', source: old.source || '', cook_minutes: old.cook_minutes ?? '' };
+  const keep = id ? S.recipeItems.filter(x => x.recipe_id === id && !x.item_id) : [];
+  const items = [...readIngs().map(x => ({ item_id: x.item_id, quantity: x.quantity })), ...keep.map(x => ({ label: x.label, amount_text: x.amount_text, note: x.note }))];
+  await run(sb.rpc('inv_save_recipe', { p_id: id, p_recipe: recipe, p_items: items }), '저장했어요');
+  closeSheet(); await refresh();
+}
+async function toggleFav(id){
+  const r = S.recipes.find(x => x.id === id);
+  await run(sb.from('inv_recipes').update({ favorite: !r.favorite }).eq('id', id));
+  closeSheet(); await refresh();
 }
 async function deleteRecipe(id){
-  if (!confirm('이 레시피를 삭제할까요? (이미 만든 식단에는 영향 없어요)')) return;
+  if (!confirm('이 메뉴를 삭제할까요? (이미 만든 식단·출고 기록에는 영향 없어요)')) return;
   await run(sb.from('inv_recipes').delete().eq('id', id), '삭제했어요');
+  RB.sel = RB.sel.filter(x => x !== id);
   closeSheet(); await refresh();
 }
 

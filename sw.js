@@ -1,4 +1,4 @@
-const CACHE_NAME = 'food-inventory-v4';
+const CACHE_NAME = 'food-inventory-v5';
 const STATIC_FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
