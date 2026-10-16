@@ -99,6 +99,8 @@ label.l{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
 .seg button{flex:1;border:0;background:none;padding:8px;border-radius:8px;font-weight:600;color:var(--muted)}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
 .msg{font-size:13px;margin-top:10px;min-height:18px}
+.rline{background:#fff;border-radius:12px;box-shadow:var(--shadow);padding:10px;margin-bottom:8px}
+.rline.off{opacity:.45}
 .btn.google{background:#fff;color:var(--ink);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:10px}
 .divider{display:flex;align-items:center;gap:10px;margin:18px 0 10px;color:var(--muted);font-size:12.5px}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
@@ -402,7 +404,7 @@ function renderStock(){
     const names = [...new Map(S.expiring.map(e => [e.item_id, e])).values()].map(e => `${esc(itemById(e.item_id)?.name||'')}(${md(e.expiry_date)})`);
     html += `<div class="banner info"><b>유통기한 임박</b><span class="grow">${names.slice(0,4).join(', ')}${names.length>4?' 외':''}</span></div>`;
   }
-  html += `<div class="search"><input class="f" placeholder="품목 검색" value="${esc(q)}" oninput="S.stockQuery=this.value;renderStockList()" id="stockQ"></div>
+  html += `<div class="search"><input class="f" placeholder="품목 검색" value="${esc(q)}" oninput="S.stockQuery=this.value;renderStockList()" id="stockQ"><button class="btn in" onclick="receiptStart()" style="white-space:nowrap">📷 영수증 입고</button></div>
   <div class="filters">
     <button class="${S.stockFilter==='all'?'on':''}" onclick="S.stockFilter='all';renderStock()">전체 ${S.items.length}</button>
     <button class="${S.stockFilter==='low'?'on':''}" onclick="S.stockFilter='low';renderStock()">부족 ${low.length}</button>
@@ -555,6 +557,7 @@ function txRow(t, i, showItem){
       <div>${showItem ? `<b>${esc(i.name)}</b> · ` : ''}${md(t.occurred_on)} <span class="small muted">${esc(t.user_name||'')}</span></div>
       ${extra ? `<div class="small muted">${extra}</div>` : ''}
       ${t.voided_at ? `<div class="small" style="color:var(--warn);text-decoration:none">취소됨</div>` : ''}
+      ${t.receipt_path ? `<button class="btn ghost sm" style="margin-top:4px" onclick="openReceipt('${esc(t.receipt_path)}')">🧾 영수증</button>` : ''}
     </div>
     <div style="text-align:right">
       <div class="delta ${d>=0?'p':'m'}">${d>=0?'+':''}${fmt(d)}${esc(i.unit)}</div>
@@ -907,7 +910,7 @@ function renderLedger(){
       <thead><tr><th>날짜</th><th style="text-align:left">적요</th><th>입고</th><th>출고</th><th>잔량</th><th>담당</th></tr></thead>
       <tbody>
         <tr class="sub"><td>${md(h.from)}</td><td style="text-align:left">전기이월</td><td></td><td></td><td><b>${fmt(op)}</b></td><td></td></tr>
-        ${rows.map(r => `<tr${r.adj ? ' class="adj"' : ''}><td>${md(r.date)}</td><td class="note">${esc(r.note)}${r.expiry ? `<span class="muted"> (유통 ${r.expiry.slice(5)})</span>` : ''}</td>
+        ${rows.map(r => `<tr${r.adj ? ' class="adj"' : ''}><td>${md(r.date)}</td><td class="note">${esc(r.note)}${r.expiry ? `<span class="muted"> (유통 ${r.expiry.slice(5)})</span>` : ''}${r.t.receipt_path ? ` <a href="#" onclick="openReceipt('${esc(r.t.receipt_path)}');return false">🧾</a>` : ''}</td>
           <td class="c-in">${cellQ(r.inQ)}</td><td class="c-out">${cellQ(r.outQ)}</td><td><b>${fmt(r.bal)}</b></td><td class="muted">${esc(r.who)}</td></tr>`).join('')}
         ${rows.length ? '' : `<tr><td colspan="6" class="muted" style="text-align:center;padding:14px">이 기간에 입출고가 없어요.</td></tr>`}
       </tbody>
@@ -1006,6 +1009,131 @@ async function printAllLedgers(){
   S.hist.ledger = keep;
   if (!parts.length) return toast('인쇄할 수불부가 없어요');
   printDoc(`재고 수불부 — ${periodLabel()}`, parts.join('') + `<p class="p-note">* 재고조사(실사) 조정</p>`);
+}
+
+// ---------- 영수증 입고 ----------
+const R = { lines:[], blob:null, preview:'' };
+function receiptStart(){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = () => inp.files[0] && receiptRead(inp.files[0]);
+  inp.click();
+}
+async function compressImage(file, max = 1600){
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
+    const base64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+    return { blob, base64 };
+  } finally { URL.revokeObjectURL(url); }
+}
+async function receiptRead(file){
+  openSheet(`<h2>🧾 영수증 읽는 중...</h2><p class="muted">품목과 수량을 확인하고 있어요. 10~20초 걸릴 수 있어요.</p><div class="empty">⏳</div>`);
+  try {
+    const { blob, base64 } = await compressImage(file);
+    R.blob = blob; R.preview && URL.revokeObjectURL(R.preview); R.preview = URL.createObjectURL(blob);
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/inv-receipt`, { method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:'Bearer ' + session.access_token },
+      body: JSON.stringify({ base64, mediaType:'image/jpeg' }) });
+    const r = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(r.error || res.status);
+    R.date = r.date || today(); R.vendor = r.vendor || ''; R.total = r.total;
+    R.lines = (r.lines || []).map(l => ({ ...l, on: true, expiry: '' }));
+    if (!R.lines.length) R.lines = [{ item_id:'', new_name:'', new_unit:'개', new_category:'기타', quantity:null, amount:null, confidence:'low', note:'', receipt_name:'', on:true, expiry:'' }];
+    receiptReview(!r.lines?.length);
+  } catch (e) {
+    openSheet(`<h2>영수증을 읽지 못했어요</h2><p class="muted">${esc(e.message || e)}</p><p class="small muted">밝은 곳에서 영수증 전체가 나오게 다시 찍어보세요.</p>
+      <div class="acts"><button class="btn ghost" onclick="closeSheet()">닫기</button><button class="btn" onclick="receiptStart()">다시 찍기</button></div>`);
+  }
+}
+function rLineHtml(l, k){
+  const it = l.item_id ? itemById(l.item_id) : null;
+  const unit = it ? it.unit : l.new_unit;
+  const cats = [...new Set([...CATEGORIES, ...S.items.map(x => x.category)])];
+  return `<div class="rline ${l.on ? '' : 'off'}" id="rl${k}">
+    <div class="row" style="gap:6px;align-items:flex-start">
+      <input type="checkbox" ${l.on ? 'checked' : ''} onchange="R.lines[${k}].on=this.checked;this.closest('.rline').classList.toggle('off',!this.checked)" style="width:20px;height:20px;margin-top:10px">
+      <div class="grow">
+        ${l.receipt_name ? `<div class="small muted">영수증: ${esc(l.receipt_name)} ${l.confidence === 'low' ? '<span class="chip low">확인 필요</span>' : ''}</div>` : ''}
+        <select class="f" style="margin-top:4px" onchange="rSetItem(${k}, this.value)">${itemSelect(l.item_id).replace('<option value="">품목 선택</option>', `<option value="__new" ${l.item_id ? '' : 'selected'}>＋ 새 품목으로 등록</option>`)}</select>
+        ${l.item_id ? '' : `<div class="grid2" style="margin-top:6px;grid-template-columns:1.6fr 1fr 1fr">
+          <input class="f" placeholder="새 품목명" value="${esc(l.new_name)}" oninput="R.lines[${k}].new_name=this.value">
+          <input class="f" list="dl_unit_r" placeholder="단위" value="${esc(l.new_unit)}" oninput="R.lines[${k}].new_unit=this.value;document.getElementById('ru${k}').textContent=this.value">
+          <select class="f" onchange="R.lines[${k}].new_category=this.value">${opts(cats, l.new_category)}</select></div>`}
+        <div class="grid2" style="margin-top:6px;grid-template-columns:1fr 1fr 1.1fr">
+          <div class="row" style="gap:4px"><input class="f" type="number" inputmode="decimal" step="any" placeholder="수량" value="${l.quantity ?? ''}" oninput="R.lines[${k}].quantity=this.value===''?null:Number(this.value)" style="min-width:0"><span class="small muted" id="ru${k}">${esc(unit)}</span></div>
+          <input class="f" type="number" inputmode="numeric" placeholder="금액(원)" value="${l.amount ?? ''}" oninput="R.lines[${k}].amount=this.value===''?null:Number(this.value);rTotal()" style="min-width:0">
+          <input class="f" type="date" title="유통기한" value="${l.expiry}" onchange="R.lines[${k}].expiry=this.value" style="min-width:0;padding:8px 4px;font-size:12px">
+        </div>
+        ${l.note ? `<div class="small muted" style="margin-top:4px">💡 ${esc(l.note)}</div>` : ''}
+      </div>
+    </div></div>`;
+}
+function rSetItem(k, v){
+  const l = R.lines[k];
+  if (v === '__new') { l.item_id = ''; l.new_name ||= l.receipt_name; }
+  else l.item_id = v;
+  $('rl' + k).outerHTML = rLineHtml(l, k);
+}
+function rTotal(){ const s = R.lines.filter(l => l.on).reduce((a,l) => a + (Number(l.amount) || 0), 0); const el = $('rsum'); if (el) el.textContent = s ? s.toLocaleString() + '원' : '-'; }
+function rAddLine(){
+  R.lines.push({ item_id:'', new_name:'', new_unit:'개', new_category:'기타', quantity:null, amount:null, confidence:'high', note:'', receipt_name:'', on:true, expiry:'' });
+  $('rlines').insertAdjacentHTML('beforeend', rLineHtml(R.lines[R.lines.length-1], R.lines.length-1));
+}
+function receiptReview(empty){
+  const units = [...new Set([...UNITS, ...S.items.map(x => x.unit)])];
+  const low = R.lines.filter(l => l.confidence === 'low').length;
+  openSheet(`
+    <div class="row"><h2 class="grow">🧾 영수증 입고 확인</h2><img src="${R.preview}" style="width:46px;height:62px;object-fit:cover;border-radius:6px;border:1px solid var(--line)" onclick="window.open('${R.preview}')"></div>
+    ${empty ? `<div class="banner warn">품목을 읽지 못했어요. 직접 입력하거나 다시 찍어주세요.</div>` : `<p class="small muted" style="margin:2px 0 6px">AI가 읽은 내용이에요. <b>수량과 품목을 꼭 확인</b>하고, 아닌 줄은 체크를 빼주세요.${low ? ` <b style="color:var(--warn)">확인 필요 ${low}줄</b>` : ''}</p>`}
+    <div class="grid2"><div><label class="l">입고 날짜</label><input class="f" type="date" value="${R.date}" onchange="R.date=this.value"></div>
+      <div><label class="l">구매처</label><input class="f" value="${esc(R.vendor)}" oninput="R.vendor=this.value"></div></div>
+    <datalist id="dl_unit_r">${units.map(u => `<option value="${esc(u)}">`).join('')}</datalist>
+    <div class="row small muted" style="margin:12px 2px 4px"><span class="grow">품목 · 수량 · 금액 · 유통기한(선택)</span><span>합계 <b id="rsum">-</b>${R.total ? ` / 영수증 ${Number(R.total).toLocaleString()}원` : ''}</span></div>
+    <div id="rlines">${R.lines.map(rLineHtml).join('')}</div>
+    <button class="btn ghost sm" onclick="rAddLine()">+ 줄 추가</button>
+    <div class="acts"><button class="btn ghost" onclick="closeSheet()">취소</button><button class="btn in" id="rok" onclick="receiptSubmit()">입고 기록</button></div>`);
+  rTotal();
+}
+async function receiptSubmit(){
+  const lines = R.lines.filter(l => l.on);
+  if (!lines.length) return toast('입고할 줄이 없어요');
+  for (const l of lines) {
+    if (!(Number(l.quantity) > 0)) return toast(`'${l.item_id ? itemById(l.item_id).name : (l.new_name || l.receipt_name)}' 수량을 입력해주세요`);
+    if (!l.item_id && !l.new_name.trim()) return toast('새 품목 이름을 입력해주세요');
+  }
+  $('rok').disabled = true; $('rok').textContent = '기록 중...';
+  try {
+    // 1) 새 품목 등록 (이미 같은 이름이 있으면 그 품목으로)
+    const byName = Object.fromEntries(S.items.map(i => [i.name, i.id]));
+    const fresh = [...new Map(lines.filter(l => !l.item_id && !byName[l.new_name.trim()]).map(l => [l.new_name.trim(), { name:l.new_name.trim(), unit:l.new_unit.trim() || '개', category:l.new_category }])).values()];
+    if (fresh.length) (await run(sb.rpc('inv_create_items', { p_items: fresh }))).forEach(i => byName[i.name] = i.id);
+    // 2) 영수증 사진 보관 (실패해도 입고는 진행)
+    let path = null;
+    if (R.blob) {
+      const p = `${R.date.slice(0,7)}/${crypto.randomUUID()}.jpg`;
+      const { error } = await sb.storage.from('inv-receipts').upload(p, R.blob, { contentType:'image/jpeg' });
+      if (!error) path = p; else console.warn('receipt upload', error);
+    }
+    // 3) 일괄 입고
+    const payload = lines.map(l => ({ item_id: l.item_id || byName[l.new_name.trim()], quantity: Number(l.quantity),
+      price: l.amount ? Math.round(Number(l.amount)) : null, expiry: l.expiry || null, memo: l.receipt_name ? `영수증: ${l.receipt_name}` : '영수증' }));
+    const n = await run(sb.rpc('inv_receive_batch', { p_date: R.date, p_vendor: R.vendor.trim(), p_lines: payload, p_receipt_path: path }));
+    toast(`${n}개 품목을 입고했어요`);
+    closeSheet(); R.lines = []; R.blob = null;
+    await refresh();
+  } catch (e) { $('rok').disabled = false; $('rok').textContent = '입고 기록'; }
+}
+async function openReceipt(path){
+  const { data, error } = await sb.storage.from('inv-receipts').createSignedUrl(path, 600);
+  if (error) return toast('영수증을 열 수 없어요');
+  window.open(data.signedUrl, '_blank');
 }
 
 // ---------- 설정 ----------
