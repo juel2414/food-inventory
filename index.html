@@ -115,6 +115,43 @@ table.sum th{font-size:12px;color:var(--muted);font-weight:600}
 .fab{position:fixed;right:18px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:25;width:54px;height:54px;border-radius:50%;border:0;background:var(--pri);color:#fff;font-size:28px;box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .member{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
 .member:last-child{border-bottom:0}
+
+.ledger-wrap{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);overflow-x:auto;margin-bottom:8px}
+table.ledger{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;min-width:330px}
+table.ledger th{background:#f1efe8;color:var(--muted);font-weight:600;font-size:12px;padding:8px 6px;text-align:right;white-space:nowrap}
+table.ledger th:first-child{text-align:left}
+table.ledger td{padding:9px 6px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}
+table.ledger td:first-child{text-align:left}
+table.ledger td.note{text-align:left;white-space:normal;min-width:90px}
+table.ledger tbody tr[onclick]{cursor:pointer}
+table.ledger tbody tr[onclick]:active{background:#f6f5f0}
+table.ledger tr.sub td{background:#fafaf6;color:var(--muted)}
+table.ledger tr.adj td{background:var(--adj-soft)}
+table.ledger tfoot td{border-top:2px solid var(--ink);font-weight:700;background:#fafaf6}
+.c-in{color:var(--in)} .c-out{color:var(--out)} .c-low{color:var(--warn)}
+#printArea{display:none}
+@media print{
+  @page{size:A4;margin:14mm 12mm}
+  body{background:#fff}
+  body > *:not(#printArea){display:none !important}
+  #printArea{display:block !important;color:#000;font-size:11px}
+  .p-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+  .p-head h1{font-size:18px;margin:0 0 4px}
+  .p-sub{font-size:10.5px;color:#444}
+  .p-sign{border-collapse:collapse}
+  .p-sign th,.p-sign td{border:1px solid #000;width:62px;text-align:center;font-size:11px;padding:3px}
+  .p-sign td{height:44px}
+  .p-item{page-break-inside:avoid;margin-bottom:14px}
+  .p-iname{font-weight:700;font-size:13px;margin:6px 0 4px}
+  .p-iname span{font-weight:400;font-size:11px;color:#444}
+  .p-table{width:100%;border-collapse:collapse}
+  .p-table th,.p-table td{border:1px solid #000;padding:3px 5px;text-align:right}
+  .p-table th{background:#eee;text-align:center}
+  .p-table td.l{text-align:left}
+  .p-table td:first-child{text-align:center}
+  .p-table tr.tot td{font-weight:700;background:#f3f3f3}
+  .p-note{font-size:10px;color:#444}
+}
 </style>
 </head>
 <body>
@@ -150,7 +187,7 @@ table.sum th{font-size:12px;color:var(--muted);font-weight:600}
     <button data-tab="stock" onclick="setTab('stock')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg>재고</button>
     <button data-tab="meals" onclick="setTab('meals')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>식단</button>
     <button data-tab="recipes" onclick="setTab('recipes')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h16a8 8 0 0 1-16 0z"/><path d="M9 9c0-2 2-2 2-4M13 9c0-2 2-2 2-4"/></svg>레시피</button>
-    <button data-tab="history" onclick="setTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h16M4 19h10"/></svg>기록</button>
+    <button data-tab="history" onclick="setTab('history')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h11l3 3v15H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>수불부</button>
     <button data-tab="more" onclick="setTab('more')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>설정</button>
   </nav>
 </div>
@@ -169,10 +206,10 @@ const WD = ['일','월','화','수','목','금','토'];
 
 const S = {
   user:null, me:null, tab:'stock',
-  items:[], recipes:[], recipeItems:[], meals:[], mealItems:[], members:[], expiring:[],
+  items:[], allItems:[], recipes:[], recipeItems:[], meals:[], mealItems:[], members:[], expiring:[],
   stockFilter:'all', stockQuery:'',
   weekStart:null,
-  hist:{ from:null, to:null, kind:'', item:'', view:'list', rows:[] },
+  hist:{ mode:'summary', from:null, to:null, kind:'', item:'', rows:[], summary:[], ledger:null },
 };
 
 // ---------- utils ----------
@@ -184,7 +221,7 @@ const today = () => new Date().toLocaleDateString('sv-SE', { timeZone:'Asia/Seou
 const addDays = (d, n) => { const x = new Date(d+'T00:00:00'); x.setDate(x.getDate()+n); return x.toLocaleDateString('sv-SE'); };
 const md = d => { const x = new Date(d+'T00:00:00'); return `${x.getMonth()+1}/${x.getDate()}(${WD[x.getDay()]})`; };
 const mondayOf = d => { const x = new Date(d+'T00:00:00'); const w = (x.getDay()+6)%7; return addDays(d, -w); };
-const itemById = id => S.items.find(i => i.id === id);
+const itemById = id => S.allItems.find(i => i.id === id);
 const isLow = i => num(i.min_quantity) > 0 && num(i.quantity) <= num(i.min_quantity);
 const isAdmin = () => S.me?.role === 'admin';
 const memberName = uid => S.members.find(m => m.user_id === uid)?.name || '';
@@ -274,7 +311,7 @@ async function enter(role){
   }
   show('appView');
   S.weekStart = mondayOf(today());
-  S.hist.from = today().slice(0,8) + '01'; S.hist.to = today();
+  S.hist.from = today().slice(0,8) + '01'; S.hist.to = lastDay(today());
   await Promise.all([loadCore(), loadMeals()]);
   subscribe();
   setTab(S.tab);
@@ -299,15 +336,15 @@ sb.auth.onAuthStateChange(async (event, session) => {
 async function loadCore(){
   const soon = addDays(today(), 7);
   const [items, recipes, recipeItems, members, exp] = await Promise.all([
-    sb.from('inv_items').select('*').eq('is_active', true).order('category').order('name'),
+    sb.from('inv_items').select('*').order('category').order('name'),
     sb.from('inv_recipes').select('*').order('name'),
     sb.from('inv_recipe_items').select('*'),
     sb.from('inv_members').select('*').order('created_at'),
     sb.from('inv_transactions').select('item_id,expiry_date,delta,occurred_on').eq('kind','in').is('voided_at', null)
       .not('expiry_date','is',null).lte('expiry_date', soon).gte('expiry_date', addDays(today(), -3)).order('expiry_date'),
   ]);
-  S.items = items.data || []; S.recipes = recipes.data || []; S.recipeItems = recipeItems.data || [];
-  S.members = members.data || []; S.expiring = (exp.data || []).filter(e => num(itemById(e.item_id)?.quantity) > 0);
+  S.allItems = items.data || []; S.items = S.allItems.filter(i => i.is_active); S.recipes = recipes.data || []; S.recipeItems = recipeItems.data || [];
+  S.members = members.data || []; S.expiring = (exp.data || []).filter(e => { const i = itemById(e.item_id); return i?.is_active && num(i.quantity) > 0; });
   const me = S.members.find(m => m.user_id === S.user.id); if (me) S.me = me;
 }
 async function loadMeals(){
@@ -326,17 +363,17 @@ function subscribe(){
   ['inv_items','inv_transactions','inv_meals','inv_meal_items','inv_recipes','inv_recipe_items','inv_members'].forEach(t =>
     channel.on('postgres_changes', { event:'*', schema:'public', table:t }, () => {
       clearTimeout(rtTimer);
-      rtTimer = setTimeout(async () => { await Promise.all([loadCore(), loadMeals()]); if (!$('sheetBg')) render(); else S.dirty = true; }, 350);
+      rtTimer = setTimeout(async () => { await Promise.all([loadCore(), loadMeals()]); if ($('sheetBg')) S.dirty = true; else if (S.tab === 'history') loadHistory(); else render(); }, 350);
     }));
   channel.subscribe(st => $('live').classList.toggle('on', st === 'SUBSCRIBED'));
 }
-async function refresh(){ await Promise.all([loadCore(), loadMeals()]); render(); }
+async function refresh(){ await Promise.all([loadCore(), loadMeals()]); if (S.tab === 'history') await loadHistory(); else render(); }
 
 // ---------- tabs ----------
 function setTab(t){
   S.tab = t;
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  $('title').textContent = { stock:'재고', meals:'식단표', recipes:'레시피', history:'입출고 기록', more:'설정' }[t];
+  $('title').textContent = { stock:'재고', meals:'식단표', recipes:'레시피', history:'재고 수불부', more:'설정' }[t];
   window.scrollTo(0,0);
   if (t === 'history') loadHistory(); else render();
 }
@@ -498,6 +535,7 @@ async function itemDetail(id){
       <button class="btn out grow" onclick="txForm('${id}','out')">사용</button>
       <button class="btn ghost grow" onclick="txForm('${id}','adjust')">실사</button>
     </div>
+    <button class="btn ghost block" style="margin-top:8px" onclick="closeSheet();setTab('history');openLedger('${id}')">📒 이 품목 수불부 보기</button>
     <div class="cathead" style="margin-top:8px">입출고 기록</div>
     <div class="list" id="d_tx"><div class="empty">불러오는 중...</div></div>`);
   const { data } = await sb.from('inv_transactions').select('*').eq('item_id', id).order('occurred_on', { ascending:false }).order('created_at', { ascending:false }).limit(100);
@@ -528,7 +566,7 @@ async function voidTx(txId, itemId){
   if (!confirm('이 기록을 취소할까요? 재고가 기록 전으로 되돌아가요.')) return;
   await run(sb.rpc('inv_void', { p_tx: txId }), '기록을 취소했어요');
   await refresh();
-  if (S.tab === 'history') loadHistory(); else itemDetail(itemId);
+  if (S.tab !== 'history') itemDetail(itemId);
 }
 
 // ---------- 식단 ----------
@@ -733,65 +771,241 @@ async function deleteRecipe(id){
   closeSheet(); await refresh();
 }
 
-// ---------- 기록 ----------
-async function loadHistory(){
-  const h = S.hist;
-  let q = sb.from('inv_transactions').select('*').gte('occurred_on', h.from).lte('occurred_on', h.to)
-    .order('occurred_on', { ascending:false }).order('created_at', { ascending:false }).limit(2000);
-  if (h.kind) q = q.eq('kind', h.kind);
-  if (h.item) q = q.eq('item_id', h.item);
-  const { data, error } = await q;
-  if (error) toast('기록을 불러오지 못했어요: ' + error.message);
-  h.rows = data || [];
-  if (S.tab === 'history') render();
+// ---------- 수불부 ----------
+const LMODES = { summary:'수불 현황', ledger:'품목별 수불부', list:'전체 기록' };
+function periodLabel(){
+  const { from, to } = S.hist;
+  if (from.slice(8) === '01' && to === lastDay(from)) return `${from.slice(0,4)}년 ${num(from.slice(5,7))}월`;
+  return `${from} ~ ${to}`;
 }
+function lastDay(d){ const x = new Date(d.slice(0,8) + '01T00:00:00'); x.setMonth(x.getMonth()+1); x.setDate(0); return x.toLocaleDateString('sv-SE'); }
+function setMonth(ym){ if (!ym) return; S.hist.from = ym + '-01'; S.hist.to = lastDay(S.hist.from); loadHistory(); }
 function histPreset(p){
   const t = today();
-  if (p === 'week') { S.hist.from = mondayOf(t); S.hist.to = t; }
-  if (p === 'month') { S.hist.from = t.slice(0,8)+'01'; S.hist.to = t; }
-  if (p === 'last') { const d = new Date(t+'T00:00:00'); d.setDate(0); const e = d.toLocaleDateString('sv-SE'); S.hist.from = e.slice(0,8)+'01'; S.hist.to = e; }
-  if (p === '3m') { S.hist.from = addDays(t, -90); S.hist.to = t; }
+  if (p === 'month') { S.hist.from = t.slice(0,8)+'01'; S.hist.to = lastDay(t); }
+  if (p === 'last') { const d = new Date(t.slice(0,8)+'01T00:00:00'); d.setDate(0); const e = d.toLocaleDateString('sv-SE'); S.hist.from = e.slice(0,8)+'01'; S.hist.to = e; }
+  if (p === 'week') { S.hist.from = mondayOf(t); S.hist.to = addDays(S.hist.from, 6); }
+  if (p === 'year') { S.hist.from = t.slice(0,4)+'-01-01'; S.hist.to = t.slice(0,4)+'-12-31'; }
   loadHistory();
 }
-function renderHistory(){
-  const h = S.hist, rows = h.rows, valid = rows.filter(r => !r.voided_at);
-  const sumIn = valid.filter(r => r.kind==='in').length, sumOut = valid.filter(r => r.kind==='out').length;
-  const spend = valid.filter(r => r.kind==='in' && r.price).reduce((a,r) => a + num(r.price), 0);
-  let html = `
-    <div class="filters">
-      <button onclick="histPreset('week')">이번 주</button><button onclick="histPreset('month')">이번 달</button>
-      <button onclick="histPreset('last')">지난 달</button><button onclick="histPreset('3m')">최근 3개월</button>
-    </div>
-    <div class="grid2"><input class="f" type="date" value="${h.from}" onchange="S.hist.from=this.value;loadHistory()"><input class="f" type="date" value="${h.to}" onchange="S.hist.to=this.value;loadHistory()"></div>
-    <div class="grid2" style="margin-top:8px">
-      <select class="f" onchange="S.hist.kind=this.value;loadHistory()"><option value="">전체 종류</option>${Object.entries(KIND).map(([k,v]) => `<option value="${k}" ${h.kind===k?'selected':''}>${v}</option>`).join('')}</select>
-      <select class="f" onchange="S.hist.item=this.value;loadHistory()"><option value="">전체 품목</option>${S.items.map(i => `<option value="${i.id}" ${h.item===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}</select>
-    </div>
-    <div class="stat" style="margin-top:12px">
-      <div><b>${sumIn}</b><span>입고 건수</span></div><div><b>${sumOut}</b><span>사용 건수</span></div><div><b>${spend ? spend.toLocaleString() : '-'}</b><span>입고 금액(원)</span></div>
-    </div>
-    <div class="seg" style="margin-top:0"><button class="${h.view==='list'?'on':''}" onclick="S.hist.view='list';render()">시간순 기록</button><button class="${h.view==='sum'?'on':''}" onclick="S.hist.view='sum';render()">품목별 합계</button></div>`;
-  if (!rows.length) html += `<div class="empty">이 기간에 기록이 없어요.</div>`;
-  else if (h.view === 'list') {
-    const byDate = {}; rows.forEach(r => (byDate[r.occurred_on] ||= []).push(r));
-    html += Object.entries(byDate).map(([d, arr]) => `<div class="cathead">${md(d)}</div><div class="list">${arr.map(t => txRow(t, null, true)).join('')}</div>`).join('');
+function openLedger(itemId){ S.hist.mode = 'ledger'; S.hist.item = itemId; loadHistory(); window.scrollTo(0,0); }
+
+async function loadHistory(){
+  const h = S.hist;
+  if (h.mode === 'summary') {
+    const { data, error } = await sb.rpc('inv_ledger_summary', { p_from:h.from, p_to:h.to });
+    if (error) toast('불러오지 못했어요: ' + error.message);
+    h.summary = data || [];
+  } else if (h.mode === 'ledger') {
+    if (!h.item || !itemById(h.item)) h.item = S.items[0]?.id || '';
+    if (h.item) {
+      const [op, rows] = await Promise.all([
+        sb.rpc('inv_item_opening', { p_item:h.item, p_from:h.from }),
+        sb.from('inv_transactions').select('*').eq('item_id', h.item).is('voided_at', null)
+          .gte('occurred_on', h.from).lte('occurred_on', h.to).order('occurred_on').order('created_at'),
+      ]);
+      h.ledger = { opening:num(op.data), rows:rows.data || [] };
+    } else h.ledger = { opening:0, rows:[] };
   } else {
-    const agg = {};
-    valid.forEach(r => { const a = agg[r.item_id] ||= { in:0, out:0, adj:0 }; if (r.kind==='in') a.in += num(r.delta); else if (r.kind==='out') a.out -= num(r.delta); else a.adj += num(r.delta); });
-    html += `<div class="card"><table class="sum"><tr><th>품목</th><th>입고</th><th>사용</th><th>실사 조정</th><th>현재</th></tr>
-      ${Object.entries(agg).map(([id, a]) => { const i = itemById(id) || { name:'(삭제된 품목)', unit:'', quantity:0 }; return `<tr><td>${esc(i.name)}</td><td>${a.in?fmt(a.in):'-'}</td><td>${a.out?fmt(a.out):'-'}</td><td>${a.adj?(a.adj>0?'+':'')+fmt(a.adj):'-'}</td><td><b>${fmt(i.quantity)}</b> <span class="small muted">${esc(i.unit)}</span></td></tr>`; }).join('')}
-    </table></div>`;
+    let q = sb.from('inv_transactions').select('*').gte('occurred_on', h.from).lte('occurred_on', h.to)
+      .order('occurred_on', { ascending:false }).order('created_at', { ascending:false }).limit(2000);
+    if (h.kind) q = q.eq('kind', h.kind);
+    if (h.item) q = q.eq('item_id', h.item);
+    const { data, error } = await q;
+    if (error) toast('기록을 불러오지 못했어요: ' + error.message);
+    h.rows = data || [];
   }
-  if (rows.length) html += `<button class="btn ghost block" onclick="exportCsv()">엑셀(CSV)로 내보내기</button>`;
-  if (rows.length >= 2000) html += `<p class="small muted">최근 2000건까지만 표시돼요. 기간을 좁혀주세요.</p>`;
+  if (S.tab === 'history') render();
+}
+
+// 수불 현황: 모든 품목(기록 없는 품목은 0) + 삭제됐지만 기간 내 기록이 있는 품목
+function summaryRows(){
+  const by = Object.fromEntries((S.hist.summary || []).map(r => [r.item_id, r]));
+  const ids = new Set([...S.items.map(i => i.id), ...Object.keys(by)]);
+  return [...ids].map(id => {
+    const i = itemById(id) || { id, name:'(삭제된 품목)', unit:'', category:'기타' };
+    const r = by[id] || {};
+    return { item:i, opening:num(r.opening), in:num(r.in_qty), out:num(r.out_qty), adj:num(r.adj_qty), closing:num(r.closing), amount:num(r.in_amount) };
+  }).filter(r => r.item.is_active !== false || r.opening || r.in || r.out || r.adj || r.closing)
+    .sort((a,b) => a.item.category.localeCompare(b.item.category, 'ko') || a.item.name.localeCompare(b.item.name, 'ko'));
+}
+// 품목별 수불부: 날짜순 행 + 잔량 누계
+function ledgerRows(){
+  const { opening, rows } = S.hist.ledger || { opening:0, rows:[] };
+  let bal = opening;
+  return rows.map(t => {
+    const d = num(t.delta); bal += d;
+    let note;
+    if (t.kind === 'in') note = ['입고', t.vendor, t.memo].filter(Boolean).join(' · ');
+    else if (t.kind === 'out') note = t.meal_id ? `식단 · ${t.memo || ''}` : ['사용', t.memo].filter(Boolean).join(' · ');
+    else note = t.memo === '초기 재고' ? '초기 재고' : ['재고조사 조정', t.memo].filter(Boolean).join(' · ');
+    return { t, date:t.occurred_on, note, inQ: d > 0 ? d : 0, outQ: d < 0 ? -d : 0, adj: t.kind === 'adjust', bal, who:t.user_name, price:t.price, expiry:t.expiry_date };
+  });
+}
+const cellQ = v => v ? fmt(v) : '';
+
+function renderHistory(){
+  const h = S.hist;
+  const [ym] = [h.from.slice(0,7)];
+  let html = `
+    <div class="seg" style="margin-top:4px">${Object.entries(LMODES).map(([k,v]) => `<button class="${h.mode===k?'on':''}" onclick="S.hist.mode='${k}';loadHistory()">${v}</button>`).join('')}</div>
+    <div class="filters" style="margin-top:8px">
+      <button onclick="histPreset('month')">이번 달</button><button onclick="histPreset('last')">지난 달</button>
+      <button onclick="histPreset('week')">이번 주</button><button onclick="histPreset('year')">올해</button>
+    </div>
+    <div class="row" style="gap:8px"><span class="small muted" style="width:52px">월 선택</span><input class="f grow" type="month" value="${ym}" onchange="setMonth(this.value)"></div>
+    <div class="row" style="gap:6px;margin-top:6px"><span class="small muted" style="width:52px">기간</span>
+      <input class="f" type="date" value="${h.from}" onchange="S.hist.from=this.value;loadHistory()" style="flex:1;min-width:0;padding:8px 6px">
+      <span class="muted">~</span>
+      <input class="f" type="date" value="${h.to}" onchange="S.hist.to=this.value;loadHistory()" style="flex:1;min-width:0;padding:8px 6px"></div>`;
+  if (h.mode === 'summary') html += renderSummary();
+  else if (h.mode === 'ledger') html += renderLedger();
+  else html += renderTxList();
   $('main').innerHTML = html;
 }
-function exportCsv(){
+
+function renderSummary(){
+  const rows = summaryRows();
+  const tot = rows.reduce((a,r) => (a.in += r.in ? 1 : 0, a.out += r.out ? 1 : 0, a.amount += r.amount, a), { in:0, out:0, amount:0 });
+  const low = rows.filter(r => num(r.item.min_quantity) > 0 && r.closing <= num(r.item.min_quantity)).length;
+  return `
+    <div class="stat" style="margin-top:12px">
+      <div><b>${tot.in}</b><span>입고 품목</span></div><div><b>${tot.out}</b><span>출고 품목</span></div><div><b>${tot.amount ? tot.amount.toLocaleString() : '-'}</b><span>입고 금액(원)</span></div>
+    </div>
+    <div class="cathead">${periodLabel()} 수불 현황 · 품목을 누르면 수불부가 열려요</div>
+    <div class="ledger-wrap"><table class="ledger">
+      <thead><tr><th>품목</th><th>전기이월</th><th>입고</th><th>출고</th><th>조정</th><th>기말재고</th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr onclick="openLedger('${r.item.id}')">
+        <td><b>${esc(r.item.name)}</b> <span class="muted">${esc(r.item.unit)}</span></td>
+        <td>${fmt(r.opening)}</td><td class="c-in">${cellQ(r.in)}</td><td class="c-out">${cellQ(r.out)}</td>
+        <td>${r.adj ? (r.adj > 0 ? '+' : '') + fmt(r.adj) : ''}</td>
+        <td class="${num(r.item.min_quantity) > 0 && r.closing <= num(r.item.min_quantity) ? 'c-low' : ''}"><b>${fmt(r.closing)}</b></td></tr>`).join('')
+        : `<tr><td colspan="6" class="empty">등록된 품목이 없어요.</td></tr>`}</tbody>
+    </table></div>
+    ${low ? `<p class="small" style="color:var(--warn)">기말재고가 최소 재고 이하인 품목 ${low}개</p>` : ''}
+    <div class="row" style="gap:8px;margin-top:10px">
+      <button class="btn ghost grow" onclick="printSummary()">🖨 수불 현황 인쇄</button>
+      <button class="btn ghost grow" onclick="printAllLedgers()">🖨 전체 수불부 인쇄</button>
+    </div>
+    <button class="btn ghost block" style="margin-top:8px" onclick="exportSummaryCsv()">엑셀(CSV)로 내보내기</button>`;
+}
+
+function renderLedger(){
+  const h = S.hist, i = itemById(h.item);
+  const sel = `<select class="f" style="margin-top:8px" onchange="S.hist.item=this.value;loadHistory()">${itemSelect(h.item).replace('<option value="">품목 선택</option>','')}</select>`;
+  if (!i) return sel + `<div class="empty">품목이 없어요.</div>`;
+  const rows = ledgerRows(), op = h.ledger?.opening || 0;
+  const sIn = rows.filter(r => !r.adj).reduce((a,r) => a + r.inQ, 0), sOut = rows.filter(r => !r.adj).reduce((a,r) => a + r.outQ, 0);
+  const sAdj = rows.filter(r => r.adj).reduce((a,r) => a + r.inQ - r.outQ, 0);
+  const closing = rows.length ? rows[rows.length-1].bal : op;
+  return sel + `
+    <div class="card" style="margin-top:10px;padding:12px 14px">
+      <div class="row"><b class="grow" style="font-size:16px">${esc(i.name)}</b><span class="chip">${esc(i.category)}</span></div>
+      <div class="small muted">단위 ${esc(i.unit)}${i.location ? ' · ' + esc(i.location) : ''} · 최소 재고 ${fmt(i.min_quantity)} · ${periodLabel()}</div>
+    </div>
+    <div class="ledger-wrap"><table class="ledger">
+      <thead><tr><th>날짜</th><th style="text-align:left">적요</th><th>입고</th><th>출고</th><th>잔량</th><th>담당</th></tr></thead>
+      <tbody>
+        <tr class="sub"><td>${md(h.from)}</td><td style="text-align:left">전기이월</td><td></td><td></td><td><b>${fmt(op)}</b></td><td></td></tr>
+        ${rows.map(r => `<tr${r.adj ? ' class="adj"' : ''}><td>${md(r.date)}</td><td class="note">${esc(r.note)}${r.expiry ? `<span class="muted"> (유통 ${r.expiry.slice(5)})</span>` : ''}</td>
+          <td class="c-in">${cellQ(r.inQ)}</td><td class="c-out">${cellQ(r.outQ)}</td><td><b>${fmt(r.bal)}</b></td><td class="muted">${esc(r.who)}</td></tr>`).join('')}
+        ${rows.length ? '' : `<tr><td colspan="6" class="muted" style="text-align:center;padding:14px">이 기간에 입출고가 없어요.</td></tr>`}
+      </tbody>
+      <tfoot>
+        <tr><td></td><td style="text-align:left">기간 합계</td><td class="c-in">${cellQ(sIn)}</td><td class="c-out">${cellQ(sOut)}</td><td><b>${fmt(closing)}</b></td><td></td></tr>
+        ${sAdj ? `<tr><td></td><td style="text-align:left">재고조사 조정</td><td colspan="2">${sAdj > 0 ? '+' : ''}${fmt(sAdj)}</td><td></td><td></td></tr>` : ''}
+      </tfoot>
+    </table></div>
+    <p class="small muted">재고조사 조정(실사)은 연한 보라색 줄이에요. 조정량은 입고·출고 합계에서 빼고 따로 보여줘요. 취소된 기록은 수불부에 나오지 않아요.</p>
+    <div class="row" style="gap:6px;margin-top:8px">
+      <button class="btn in grow" onclick="txForm('${i.id}','in')">입고</button><button class="btn out grow" onclick="txForm('${i.id}','out')">사용</button><button class="btn ghost grow" onclick="txForm('${i.id}','adjust')">실사</button>
+    </div>
+    <div class="row" style="gap:8px;margin-top:8px">
+      <button class="btn ghost grow" onclick="printLedger()">🖨 인쇄</button><button class="btn ghost grow" onclick="exportLedgerCsv()">엑셀(CSV)</button>
+    </div>`;
+}
+
+function renderTxList(){
+  const h = S.hist, rows = h.rows || [];
+  let html = `<div class="grid2" style="margin-top:8px">
+      <select class="f" onchange="S.hist.kind=this.value;loadHistory()"><option value="">전체 종류</option>${Object.entries(KIND).map(([k,v]) => `<option value="${k}" ${h.kind===k?'selected':''}>${v}</option>`).join('')}</select>
+      <select class="f" onchange="S.hist.item=this.value;loadHistory()"><option value="">전체 품목</option>${S.items.map(i => `<option value="${i.id}" ${h.item===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}</select>
+    </div><p class="small muted" style="margin:8px 2px">취소된 기록까지 모두 보여줘요. 잘못 입력한 기록은 여기서 취소할 수 있어요.</p>`;
+  if (!rows.length) return html + `<div class="empty">이 기간에 기록이 없어요.</div>`;
+  const byDate = {}; rows.forEach(r => (byDate[r.occurred_on] ||= []).push(r));
+  html += Object.entries(byDate).map(([d, arr]) => `<div class="cathead">${md(d)}</div><div class="list">${arr.map(t => txRow(t, null, true)).join('')}</div>`).join('');
+  html += `<button class="btn ghost block" onclick="exportCsv()">엑셀(CSV)로 내보내기</button>`;
+  if (rows.length >= 2000) html += `<p class="small muted">최근 2000건까지만 표시돼요. 기간을 좁혀주세요.</p>`;
+  return html;
+}
+
+// ----- 내보내기 -----
+function downloadCsv(name, head, lines){
   const cell = v => `"${String(v ?? '').replace(/"/g,'""')}"`;
-  const head = ['날짜','종류','품목','분류','변화량','단위','잔량','유통기한','구매처','금액','메모','기록자','식단기록','취소여부','기록시각'];
-  const lines = S.hist.rows.map(t => { const i = itemById(t.item_id) || {}; return [t.occurred_on, KIND[t.kind], i.name, i.category, num(t.delta), i.unit, num(t.balance_after), t.expiry_date, t.vendor, t.price, t.memo, t.user_name, t.meal_id?'O':'', t.voided_at?'취소됨':'', new Date(t.created_at).toLocaleString('ko-KR')].map(cell).join(','); });
-  const blob = new Blob(['﻿' + [head.map(cell).join(','), ...lines].join('\n')], { type:'text/csv;charset=utf-8' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `식자재기록_${S.hist.from}_${S.hist.to}.csv`; a.click();
+  const blob = new Blob(['﻿' + [head, ...lines].map(r => r.map(cell).join(',')).join('\n')], { type:'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+}
+function exportCsv(){
+  downloadCsv(`식자재기록_${S.hist.from}_${S.hist.to}.csv`,
+    ['날짜','종류','품목','분류','변화량','단위','잔량','유통기한','구매처','금액','메모','기록자','식단기록','취소여부','기록시각'],
+    S.hist.rows.map(t => { const i = itemById(t.item_id) || {}; return [t.occurred_on, KIND[t.kind], i.name, i.category, num(t.delta), i.unit, num(t.balance_after), t.expiry_date, t.vendor, t.price, t.memo, t.user_name, t.meal_id?'O':'', t.voided_at?'취소됨':'', new Date(t.created_at).toLocaleString('ko-KR')]; }));
+}
+function exportSummaryCsv(){
+  downloadCsv(`재고수불현황_${S.hist.from}_${S.hist.to}.csv`, ['분류','품목','단위','전기이월','입고','출고','조정','기말재고','입고금액','최소재고'],
+    summaryRows().map(r => [r.item.category, r.item.name, r.item.unit, r.opening, r.in, r.out, r.adj, r.closing, r.amount || '', num(r.item.min_quantity)]));
+}
+function exportLedgerCsv(){
+  const i = itemById(S.hist.item), rows = ledgerRows();
+  downloadCsv(`재고수불부_${i.name}_${S.hist.from}_${S.hist.to}.csv`, ['날짜','적요','입고','출고','잔량','담당','금액','유통기한'],
+    [[S.hist.from, '전기이월', '', '', S.hist.ledger.opening, '', '', ''], ...rows.map(r => [r.date, r.note, r.inQ || '', r.outQ || '', r.bal, r.who, r.price || '', r.expiry || ''])]);
+}
+
+// ----- 인쇄 -----
+function printDoc(title, bodyHtml){
+  $('printArea')?.remove();
+  const d = document.createElement('div'); d.id = 'printArea';
+  d.innerHTML = `<div class="p-head"><div><h1>${esc(title)}</h1><div class="p-sub">기간: ${S.hist.from} ~ ${S.hist.to} · 출력: ${new Date().toLocaleString('ko-KR')}</div></div>
+    <table class="p-sign"><tr><th>담당</th><th>확인</th></tr><tr><td></td><td></td></tr></table></div>${bodyHtml}`;
+  document.body.appendChild(d);
+  const done = () => { d.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => window.print(), 50);
+}
+function ledgerTableHtml(item, opening, rows){
+  const sIn = rows.filter(r => !r.adj).reduce((a,r) => a + r.inQ, 0), sOut = rows.filter(r => !r.adj).reduce((a,r) => a + r.outQ, 0);
+  const sAdj = rows.filter(r => r.adj).reduce((a,r) => a + r.inQ - r.outQ, 0);
+  const closing = rows.length ? rows[rows.length-1].bal : opening;
+  return `<div class="p-item"><div class="p-iname">${esc(item.name)} <span>(${esc(item.category)} · 단위 ${esc(item.unit)}${item.location ? ' · ' + esc(item.location) : ''})</span></div>
+    <table class="p-table"><thead><tr><th style="width:13%">날짜</th><th>적요</th><th style="width:12%">입고</th><th style="width:12%">출고</th><th style="width:12%">잔량</th><th style="width:12%">담당</th></tr></thead><tbody>
+    <tr><td>${S.hist.from.slice(5).replace('-','/')}</td><td class="l">전기이월</td><td></td><td></td><td>${fmt(opening)}</td><td></td></tr>
+    ${rows.map(r => `<tr><td>${r.date.slice(5).replace('-','/')}</td><td class="l">${esc(r.note)}${r.adj ? ' *' : ''}</td><td>${cellQ(r.inQ)}</td><td>${cellQ(r.outQ)}</td><td>${fmt(r.bal)}</td><td>${esc(r.who)}</td></tr>`).join('')}
+    <tr class="tot"><td></td><td class="l">합계${sAdj ? ` (조정 ${sAdj > 0 ? '+' : ''}${fmt(sAdj)})` : ''}</td><td>${cellQ(sIn)}</td><td>${cellQ(sOut)}</td><td>${fmt(closing)}</td><td></td></tr>
+    </tbody></table></div>`;
+}
+function printLedger(){
+  const i = itemById(S.hist.item);
+  printDoc(`재고 수불부 — ${periodLabel()}`, ledgerTableHtml(i, S.hist.ledger.opening, ledgerRows()) + `<p class="p-note">* 재고조사(실사) 조정</p>`);
+}
+function printSummary(){
+  const rows = summaryRows();
+  printDoc(`재고 수불 현황 — ${periodLabel()}`, `<table class="p-table"><thead><tr><th>분류</th><th>품목</th><th>단위</th><th>전기이월</th><th>입고</th><th>출고</th><th>조정</th><th>기말재고</th><th>입고금액</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td>${esc(r.item.category)}</td><td class="l">${esc(r.item.name)}</td><td>${esc(r.item.unit)}</td><td>${fmt(r.opening)}</td><td>${cellQ(r.in)}</td><td>${cellQ(r.out)}</td><td>${r.adj ? (r.adj > 0 ? '+' : '') + fmt(r.adj) : ''}</td><td>${fmt(r.closing)}</td><td>${r.amount ? r.amount.toLocaleString() : ''}</td></tr>`).join('')}
+    </tbody></table>`);
+}
+async function printAllLedgers(){
+  toast('수불부를 만드는 중...');
+  const { data, error } = await sb.from('inv_transactions').select('*').is('voided_at', null)
+    .gte('occurred_on', S.hist.from).lte('occurred_on', S.hist.to).order('occurred_on').order('created_at').limit(10000);
+  if (error) return toast('불러오지 못했어요: ' + error.message);
+  const byItem = {}; (data || []).forEach(t => (byItem[t.item_id] ||= []).push(t));
+  const keep = S.hist.ledger;
+  const parts = summaryRows().filter(r => r.opening || byItem[r.item.id]).map(r => {
+    S.hist.ledger = { opening:r.opening, rows:byItem[r.item.id] || [] };
+    return ledgerTableHtml(r.item, r.opening, ledgerRows());
+  });
+  S.hist.ledger = keep;
+  if (!parts.length) return toast('인쇄할 수불부가 없어요');
+  printDoc(`재고 수불부 — ${periodLabel()}`, parts.join('') + `<p class="p-note">* 재고조사(실사) 조정</p>`);
 }
 
 // ---------- 설정 ----------
@@ -902,7 +1116,7 @@ async function bulkImport(){
 }
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.me && S.me.role !== 'pending') refresh(); });
-const _close = closeSheet; closeSheet = function(){ _close(); if (S.dirty) render(); };
+const _close = closeSheet; closeSheet = function(){ _close(); if (S.dirty) { if (S.tab === 'history') loadHistory(); else render(); } };
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
