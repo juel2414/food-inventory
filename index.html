@@ -45,7 +45,7 @@ nav.tabs button.on{color:var(--pri);font-weight:700}
 .btn.block{width:100%;padding:13px}
 .chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 9px;font-size:12px;background:#efede6;color:var(--ink);white-space:nowrap}
 .chip.low{background:var(--warn-soft);color:var(--warn);font-weight:700}
-.chip.in{background:var(--in-soft);color:var(--in)} .chip.out{background:var(--out-soft);color:var(--out)} .chip.adjust{background:var(--adj-soft);color:var(--adj)}
+.chip.in{background:var(--in-soft);color:var(--in)} .chip.out{background:var(--out-soft);color:var(--out)} .chip.adjust{background:var(--adj-soft);color:var(--adj)} .chip.return{background:#e7f4ee;color:#1f7a55}
 .chip.done{background:var(--pri-soft);color:var(--pri);font-weight:700}
 input.f,select.f,textarea.f{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;min-height:42px}
 textarea.f{min-height:90px}
@@ -209,12 +209,12 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSe
 const CATEGORIES = ['채소','과일','육류','수산','곡류·면','양념·소스','유제품·계란','가공식품','냉동','음료','기타'];
 const UNITS = ['kg','g','개','봉','팩','모','단','병','캔','L','ml','박스','포'];
 const SLOTS = { breakfast:'아침', lunch:'점심', dinner:'저녁', snack:'간식' };
-const KIND = { in:'입고', out:'사용', adjust:'실사' };
+const KIND = { in:'입고', out:'사용', adjust:'실사', return:'반납' };
 const WD = ['일','월','화','수','목','금','토'];
 
 const S = {
   user:null, me:null, tab:'stock',
-  items:[], allItems:[], recipes:[], recipeItems:[], meals:[], mealItems:[], members:[], expiring:[],
+  items:[], allItems:[], recipes:[], recipeItems:[], meals:[], mealItems:[], mealReturns:[], members:[], expiring:[],
   stockFilter:'all', stockQuery:'',
   weekStart:null,
   hist:{ mode:'summary', from:null, to:null, kind:'', item:'', rows:[], summary:[], ledger:null },
@@ -360,8 +360,14 @@ async function loadMeals(){
   const { data: meals } = await sb.from('inv_meals').select('*').gte('meal_date', from).lte('meal_date', to).order('meal_date');
   S.meals = meals || [];
   const ids = S.meals.map(m => m.id);
-  if (ids.length) { const { data } = await sb.from('inv_meal_items').select('*').in('meal_id', ids); S.mealItems = data || []; }
-  else S.mealItems = [];
+  if (ids.length) {
+    const [mi, rt] = await Promise.all([
+      sb.from('inv_meal_items').select('*').in('meal_id', ids),
+      sb.from('inv_transactions').select('id,meal_id,item_id,delta,user_name,occurred_on').eq('kind','return').is('voided_at', null).in('meal_id', ids),
+    ]);
+    S.mealItems = mi.data || []; S.mealReturns = rt.data || [];
+  }
+  else { S.mealItems = []; S.mealReturns = []; }
 }
 
 let rtTimer = null, channel = null;
@@ -549,13 +555,13 @@ async function itemDetail(id){
   const { data } = await sb.from('inv_transactions').select('*').eq('item_id', id).order('occurred_on', { ascending:false }).order('created_at', { ascending:false }).limit(100);
   if (!$('d_tx')) return;
   const m0 = today().slice(0,8) + '01';
-  $('d_month').textContent = fmt(-(data||[]).filter(t => !t.voided_at && t.kind==='out' && t.occurred_on >= m0).reduce((a,t) => a + num(t.delta), 0));
+  $('d_month').textContent = fmt(-(data||[]).filter(t => !t.voided_at && (t.kind==='out' || t.kind==='return') && t.occurred_on >= m0).reduce((a,t) => a + num(t.delta), 0));
   $('d_tx').innerHTML = (data && data.length) ? data.map(t => txRow(t, i)).join('') : `<div class="empty">아직 기록이 없어요.</div>`;
 }
 function txRow(t, i, showItem){
   i ||= itemById(t.item_id) || { name:'(삭제된 품목)', unit:'' };
   const d = num(t.delta), meal = t.meal_id ? '식단' : '';
-  const canVoid = !t.voided_at && !t.meal_id && (t.user_id === S.user.id || isAdmin());
+  const canVoid = !t.voided_at && (!t.meal_id || t.kind === 'return') && (t.user_id === S.user.id || isAdmin());
   const extra = [t.vendor && `구매처 ${esc(t.vendor)}`, t.price && `${num(t.price).toLocaleString()}원`, t.expiry_date && `유통기한 ${t.expiry_date}`, t.memo && esc(t.memo)].filter(Boolean).join(' · ');
   return `<div class="tx ${t.voided_at?'void':''}">
     <span class="chip ${t.kind}">${KIND[t.kind]}${meal?'·'+meal:''}</span>
@@ -620,7 +626,9 @@ function mealCard(m){
         : `<button class="btn sm" onclick="completeMeal('${m.id}')" ${ings.length?'':'disabled'}>사용 완료</button>`}
     </div>
     <div class="ings" onclick="mealEditor('${m.id}')">${ingTxt || '재료를 추가하려면 눌러주세요'}</div>
-    ${m.status==='done' ? `<div class="small muted" style="margin-top:6px">${esc(memberName(m.done_by))} · ${new Date(m.done_at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 차감 <button class="btn ghost sm" style="margin-left:6px" onclick="cancelMeal('${m.id}')">사용 취소</button></div>` : ''}
+    ${m.status==='done' ? `<div class="small muted" style="margin-top:6px">${esc(memberName(m.done_by))} · ${new Date(m.done_at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 차감</div>
+      ${returnedOf(m.id).length ? `<div class="small" style="color:#1f7a55;margin-top:4px">↩️ 반납: ${returnedOf(m.id).map(r => { const i = itemById(r.item_id); return `${esc(i?.name || '')} ${fmt(r.qty)}${esc(i?.unit || '')}`; }).join(', ')}</div>` : ''}
+      <div class="row" style="gap:6px;margin-top:8px"><button class="btn ghost sm" style="color:#1f7a55" onclick="returnSheet('${m.id}')">↩️ 남은 재료 반납</button><button class="btn ghost sm" onclick="cancelMeal('${m.id}')">사용 취소</button></div>` : ''}
     ${m.memo ? `<div class="small muted" style="margin-top:4px">${esc(m.memo)}</div>` : ''}
   </div>`;
 }
@@ -678,9 +686,10 @@ function mealEditor(id, date, slot){
   const ings = id ? mealNeeds(id) : [];
   if (done) {
     openSheet(`<h2>${esc(m.title||'식단')}</h2><div class="muted small">${md(m.meal_date)} ${SLOTS[m.slot]} · 사용 완료</div>
-      <div class="list" style="margin-top:12px">${ings.map(x => { const i=itemById(x.item_id); return `<div class="item"><div class="grow">${esc(i?.name||'(삭제된 품목)')}</div><div class="qty">${fmt(x.quantity)}<span class="small muted"> ${esc(i?.unit||'')}</span></div></div>`; }).join('')}</div>
-      <p class="small muted">수정하려면 먼저 '사용 취소'로 재고를 되돌려주세요.</p>
-      <div class="acts"><button class="btn ghost" onclick="closeSheet()">닫기</button><button class="btn warn" onclick="cancelMeal('${m.id}')">사용 취소</button></div>`);
+      <div class="list" style="margin-top:12px">${ings.map(x => { const i=itemById(x.item_id), back = returnedQty(m.id, x.item_id);
+        return `<div class="item"><div class="grow">${esc(i?.name||'(삭제된 품목)')}${back ? `<div class="small" style="color:#1f7a55">출고 ${fmt(x.quantity)} · 반납 ${fmt(back)}</div>` : ''}</div><div class="qty">${fmt(num(x.quantity) - back)}<span class="small muted"> ${esc(i?.unit||'')} 사용</span></div></div>`; }).join('')}</div>
+      <p class="small muted">남은 재료는 '반납'으로 되돌리고, 메뉴를 아예 안 만들었으면 '사용 취소'를 누르세요.</p>
+      <div class="acts"><button class="btn ghost" onclick="closeSheet()">닫기</button><button class="btn warn" onclick="cancelMeal('${m.id}')">사용 취소</button><button class="btn" style="background:#1f7a55" onclick="returnSheet('${m.id}')">↩️ 반납</button></div>`);
     return;
   }
   openSheet(`
@@ -736,6 +745,36 @@ async function cancelMeal(id){
   if (!confirm('사용 완료를 취소할까요? 차감했던 재료가 재고로 돌아가요.')) return;
   await run(sb.rpc('inv_cancel_meal', { p_meal:id }), '사용을 취소하고 재고를 되돌렸어요');
   closeSheet(); await refresh();
+}
+
+
+// ---------- 반납 ----------
+function returnedQty(mealId, itemId){ return (S.mealReturns || []).filter(r => r.meal_id === mealId && r.item_id === itemId).reduce((a,r) => a + num(r.delta), 0); }
+function returnedOf(mealId){
+  const by = {}; (S.mealReturns || []).filter(r => r.meal_id === mealId).forEach(r => by[r.item_id] = (by[r.item_id] || 0) + num(r.delta));
+  return Object.entries(by).map(([item_id, qty]) => ({ item_id, qty }));
+}
+function returnSheet(mealId){
+  const m = S.meals.find(x => x.id === mealId);
+  const rows = mealNeeds(mealId).map(x => ({ ...x, i: itemById(x.item_id), left: round3(num(x.quantity) - returnedQty(mealId, x.item_id)) })).filter(x => x.i && x.left > 0);
+  openSheet(`<h2>↩️ 남은 재료 반납</h2><div class="muted small">${md(m.meal_date)} ${SLOTS[m.slot]} · ${esc(m.title || '식단')}</div>
+    <p class="small muted" style="margin:8px 0">창고에 다시 넣은 양만 입력하세요. 재고에 다시 더해지고, 수불부에는 출고에서 빠진 양으로 기록돼요.</p>
+    <div class="list">${rows.map(x => `<div class="item"><div class="grow"><b>${esc(x.i.name)}</b><div class="small muted">출고 ${fmt(x.quantity)}${esc(x.i.unit)}${x.left < num(x.quantity) ? ` · 이미 반납 ${fmt(num(x.quantity) - x.left)}` : ''}</div></div>
+      <button class="btn ghost sm" onclick="this.nextElementSibling.value=${x.left}">전부</button>
+      <input class="f rt-q" data-item="${x.item_id}" data-max="${x.left}" type="number" inputmode="decimal" step="any" min="0" placeholder="0" style="width:84px"><span class="small muted" style="width:26px">${esc(x.i.unit)}</span></div>`).join('') || '<div class="empty">반납할 수 있는 재료가 없어요.</div>'}</div>
+    <label class="l">반납한 날짜</label><input class="f" id="rt_d" type="date" value="${today()}">
+    <div class="acts"><button class="btn ghost" onclick="closeSheet()">닫기</button><button class="btn" style="background:#1f7a55" id="rt_ok" onclick="submitReturn('${mealId}')">반납 기록</button></div>`);
+}
+async function submitReturn(mealId){
+  const lines = [...document.querySelectorAll('.rt-q')].map(e => ({ item_id: e.dataset.item, quantity: num(e.value), max: num(e.dataset.max) })).filter(l => l.quantity > 0);
+  if (!lines.length) return toast('반납할 수량을 입력해주세요');
+  const over = lines.find(l => l.quantity > l.max);
+  if (over) return toast(`${itemById(over.item_id).name}: 출고한 양(${fmt(over.max)})보다 많아요`);
+  $('rt_ok').disabled = true;
+  try {
+    const n = await run(sb.rpc('inv_return_meal', { p_meal: mealId, p_lines: lines.map(({ item_id, quantity }) => ({ item_id, quantity })), p_date: $('rt_d').value || null }));
+    toast(`${n}개 재료를 반납했어요`); closeSheet(); await refresh();
+  } catch { $('rt_ok').disabled = false; }
 }
 
 // ---------- 레시피북 ----------
@@ -959,8 +998,9 @@ function ledgerRows(){
     let note;
     if (t.kind === 'in') note = ['입고', t.vendor, t.memo].filter(Boolean).join(' · ');
     else if (t.kind === 'out') note = t.meal_id ? `식단 · ${t.memo || ''}` : ['사용', t.memo].filter(Boolean).join(' · ');
+    else if (t.kind === 'return') note = `반납 · ${t.memo || ''}`;
     else note = t.memo === '초기 재고' ? '초기 재고' : ['재고조사 조정', t.memo].filter(Boolean).join(' · ');
-    return { t, date:t.occurred_on, note, inQ: d > 0 ? d : 0, outQ: d < 0 ? -d : 0, adj: t.kind === 'adjust', bal, who:t.user_name, price:t.price, expiry:t.expiry_date };
+    return { t, date:t.occurred_on, note, inQ: t.kind === 'return' ? 0 : d > 0 ? d : 0, outQ: t.kind === 'return' ? -d : d < 0 ? -d : 0, adj: t.kind === 'adjust', bal, who:t.user_name, price:t.price, expiry:t.expiry_date };
   });
 }
 const cellQ = v => v ? fmt(v) : '';
