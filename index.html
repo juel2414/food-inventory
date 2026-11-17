@@ -344,7 +344,7 @@ sb.auth.onAuthStateChange(async (event, session) => {
 async function loadCore(){
   const soon = addDays(today(), 7);
   const [items, recipes, recipeItems, members, exp] = await Promise.all([
-    sb.from('inv_items').select('*').order('category').order('name'),
+    sb.from('inv_items').select('*').order('sort').order('name'),
     sb.from('inv_recipes').select('*').order('name'),
     sb.from('inv_recipe_items').select('*'),
     sb.from('inv_members').select('*').order('created_at'),
@@ -416,7 +416,7 @@ function renderStock(){
     const names = [...new Map(S.expiring.map(e => [e.item_id, e])).values()].map(e => `${esc(itemById(e.item_id)?.name||'')}(${md(e.expiry_date)})`);
     html += `<div class="banner info"><b>유통기한 임박</b><span class="grow">${names.slice(0,4).join(', ')}${names.length>4?' 외':''}</span></div>`;
   }
-  html += `<div class="search"><input class="f" placeholder="품목 검색" value="${esc(q)}" oninput="S.stockQuery=this.value;renderStockList()" id="stockQ"><button class="btn in" onclick="receiptStart()" style="white-space:nowrap">📷 영수증 입고</button></div>
+  html += `<div class="search"><input class="f" placeholder="품목 검색" value="${esc(q)}" oninput="S.stockQuery=this.value;renderStockList()" id="stockQ"><button class="btn ghost" onclick="countSheet()">📋 실사</button><button class="btn in" onclick="receiptStart()">📷 영수증</button></div>
   <div class="filters">
     <button class="${S.stockFilter==='all'?'on':''}" onclick="S.stockFilter='all';renderStock()">전체 ${S.items.length}</button>
     <button class="${S.stockFilter==='low'?'on':''}" onclick="S.stockFilter='low';renderStock()">부족 ${low.length}</button>
@@ -450,6 +450,51 @@ function renderStockList(){
         <button class="btn sm in" onclick="txForm('${i.id}','in')">입고</button>
         <button class="btn sm out" onclick="txForm('${i.id}','out')">사용</button>
       </div>`).join('')}</div>`).join('');
+}
+// ---------- 일괄 실사 ----------
+const CNT = { cat:'all', vals:{}, date:'' };
+function countSheet(){
+  CNT.date ||= today();
+  const cats = [...new Set(S.items.map(i => i.category))];
+  const list = S.items.filter(i => CNT.cat === 'all' || i.category === CNT.cat);
+  const groups = {}; list.forEach(i => (groups[i.category] ||= []).push(i));
+  openSheet(`<h2>📋 일괄 실사</h2>
+    <p class="small muted" style="margin:4px 0 8px">세어 본 수량만 적으세요. 빈칸은 그대로 두고, 적은 품목만 지금 수량으로 맞춰져요.</p>
+    <label class="l">실사 날짜</label><input class="f" type="date" value="${CNT.date}" onchange="CNT.date=this.value">
+    <div class="filters" style="margin-top:10px">
+      <button class="${CNT.cat==='all'?'on':''}" onclick="CNT.cat='all';countSheet()">전체</button>
+      ${cats.map(c => `<button class="${CNT.cat===c?'on':''}" onclick="CNT.cat='${esc(c)}';countSheet()">${esc(c)}</button>`).join('')}
+    </div>
+    ${Object.entries(groups).map(([c, arr]) => `<div class="cathead">${esc(c)}</div>
+    <div class="list">${arr.map(i => `<div class="item" style="padding:8px 14px">
+      <div class="grow"><b>${esc(i.name)}</b><div class="small muted">지금 ${fmt(i.quantity)}${esc(i.unit)}</div></div>
+      <input class="f" type="number" inputmode="decimal" step="any" min="0" placeholder="" value="${CNT.vals[i.id] ?? ''}"
+        oninput="countInput('${i.id}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();countNext(this)}" style="width:84px">
+      <span class="small muted" style="width:26px">${esc(i.unit)}</span></div>`).join('')}</div>`).join('')}
+    <div class="acts" style="position:sticky;bottom:0;background:var(--bg);padding-top:10px"><button class="btn ghost" onclick="closeSheet()">닫기</button>
+      <button class="btn" id="cnt_ok" onclick="submitCount()">저장 <span id="cnt_n">${countFilled()}</span>개</button></div>`);
+}
+const countFilled = () => Object.keys(CNT.vals).length;
+function countInput(id, v){
+  if (v === '') delete CNT.vals[id]; else CNT.vals[id] = v;
+  const n = $('cnt_n'); if (n) n.textContent = countFilled();
+}
+function countNext(el){
+  const all = [...document.querySelectorAll('#sheet input[type=number]')];
+  all[all.indexOf(el) + 1]?.focus();
+}
+async function submitCount(){
+  const lines = Object.entries(CNT.vals).filter(([id]) => itemById(id)).map(([item_id, v]) => ({ item_id, quantity: num(v) }));
+  if (!lines.length) return toast('세어 본 수량을 입력해주세요');
+  const bad = lines.find(l => !(l.quantity >= 0));
+  if (bad) return toast(`${itemById(bad.item_id).name}: 수량을 확인해주세요`);
+  const same = lines.filter(l => num(itemById(l.item_id).quantity) === l.quantity).length;
+  if (!confirm(`${lines.length}개 품목을 실사 수량으로 맞출까요?${same ? `\n(그중 ${same}개는 지금 수량과 같아서 기록되지 않아요)` : ''}`)) return;
+  $('cnt_ok').disabled = true;
+  try {
+    const n = await run(sb.rpc('inv_adjust_batch', { p_date: CNT.date || null, p_lines: lines }));
+    CNT.vals = {}; closeSheet(); toast(`${n}개 품목 수량을 맞췄어요`); await refresh();
+  } catch { $('cnt_ok') && ($('cnt_ok').disabled = false); }
 }
 function copyShopping(){
   const t = S.items.filter(isLow).map(i => `- ${i.name}: 현재 ${fmt(i.quantity)}${i.unit} (최소 ${fmt(i.min_quantity)}${i.unit})`).join('\n');
